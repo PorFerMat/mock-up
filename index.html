@@ -74,17 +74,20 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;padding:4px 16px 24
 @media(max-width:1100px){.cols{grid-template-columns:1fr}}
 @media(max-width:860px){header{padding:12px 16px}.layout{grid-template-columns:minmax(0,1fr);padding:16px}.list{flex-direction:row;overflow-x:auto}.case{min-width:220px}.slots{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.stamp{margin-left:0}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);padding:22px;width:min(520px,calc(100vw - 32px))}dialog::backdrop{background:rgba(10,15,20,.5)}dialog h2{margin:0 0 12px;font-size:18px}dialog form{display:block}dialog label{display:grid;gap:4px;margin-bottom:12px;font-weight:500}dialog input{border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:var(--soft)}dialog pre{white-space:pre-wrap;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:12px;max-height:50vh;overflow:auto;font:inherit}.end{display:flex;justify-content:flex-end;gap:8px}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}.modebtn{border-radius:99px}
 </style>
 </head>
 <body>
 <header>
   <div class="brand"><div class="mark">ศ</div><div><b>Sila</b><small>Rental document check, Thai lease rules B.E. 2568</small></div></div>
-  <nav role="tablist"><button role="tab" id="t-cases" aria-selected="true" onclick="tab('cases')">Cases</button><button role="tab" id="t-bill" aria-selected="false" onclick="tab('bill')">Monthly billing</button></nav>
+  <nav role="tablist"><button role="tab" id="t-cases" aria-selected="true" onclick="tab('cases')">Cases</button><button role="tab" id="t-ten" aria-selected="false" onclick="tab('ten')">Tenants and receipts</button><button role="tab" id="t-bill" aria-selected="false" onclick="tab('bill')">Monthly billing</button></nav>
+  <button id="mode" class="modebtn primary" onclick="toggleMode()" title="What checks the lease clauses">keyword rules</button>
   <div class="stats" id="stats"></div>
 </header>
 
 <div class="layout" id="v-cases">
-  <aside><div class="top"><h2>Cases</h2><button class="primary" onclick="toast('Mockup: opens the New case dialog')">+ New case</button></div><div class="list" id="list"></div></aside>
+  <aside><div class="top"><h2>Cases</h2><button class="primary" onclick="$('dNew').showModal()">+ New case</button></div><div class="list" id="list"></div></aside>
   <main id="main"></main>
 </div>
 
@@ -110,6 +113,11 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;padding:4px 16px 24
     </section>
   </main>
 </div>
+<div class="layout" id="v-ten" style="display:none;grid-template-columns:minmax(0,1fr)"><main id="tenmain"></main></div>
+<dialog id="dNew"><form onsubmit="makeCase(event)"><h2>New rental case</h2><label>Tenant name, as in the lease<input name="tenant" required minlength="2" placeholder="นายสมชาย ตัวอย่าง"></label><label>Unit<input name="unit" required placeholder="Room 305"></label><div class="end"><button type="button" onclick="$('dNew').close()">Cancel</button><button class="primary">Create case</button></div></form></dialog>
+<dialog id="dEdit"><form onsubmit="saveT(event)"><h2>Edit tenant</h2><label>Tenant name<input id="fT" required minlength="2"></label><label>Unit<input id="fU" required></label><div class="end"><button type="button" onclick="$('dEdit').close()">Cancel</button><button class="primary">Save</button></div></form></dialog>
+<dialog id="dRent"><form onsubmit="saveR(event)"><h2>Set rent</h2><label>Monthly rent in baht<input id="fA" type="number" min="0" required></label><label>Due day of the month<input id="fD" type="number" min="1" max="28" required></label><div class="end"><button type="button" onclick="$('dRent').close()">Cancel</button><button class="primary">Save rent</button></div></form></dialog>
+<dialog id="dView"><h2 id="vT"></h2><pre id="vB"></pre><div class="end"><button onclick="$('dView').close()">Close</button></div></dialog>
 <footer>Synthetic demo data only. Checks support staff and are not legal advice. Nothing is sent to customers automatically.</footer>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -117,15 +125,16 @@ footer{text-align:center;color:var(--muted);font-size:12.5px;padding:4px 16px 24
 const KIND={lease:'Lease contract',id:'Thai ID card',receipt:'Deposit receipt'};
 const ST={internal:'Internal fix needed',customer:'Waiting on customer',ready:'Ready to sign'};
 const VD={internal:'Our paperwork needs fixing before this lease can be signed.',customer:'Our paperwork is fine. Waiting on the customer for the items on the right.',ready:'All three documents pass every check.'};
-const LV={high:'Blocks signing',med:'Must fix'};
-const rule=(id,t)=>({id,t,src:'Thai residential lease rules B.E. 2568'});
+const LV={high:'Blocks signing',med:'Must fix',check:'Staff check'};
+const RULES={R17:{t:'No lockout, and no entry to seize or remove the tenant’s belongings, without lawful termination.',s:'OAL §3; Tilleke, prohibited terms',st:'secondary source'},R14:{t:'No forfeiture of deposit or advance rent where the tenant is not at fault.',s:'OAL §3; Tilleke, prohibited terms',st:'secondary source'},R04:{t:'Deposit plus advance rent must not exceed 3 months’ rent (short-term) or 1 year’s rent (long-term).',s:'OAL §3; Tilleke, prohibited terms',st:'sources disagree',note:'OAL ties the cap to the lease term, Tilleke to payment frequency. The check uses payment frequency; confirm against the official text.'},R08:{t:'Deliver written invoices for rent, utilities and service fees at least 3 days before the due date.',s:'Tilleke, invoices',st:'secondary source'}};
+const rule=id=>({id,...RULES[id]});
 const DATA=[
 {id:1,tenant:'นายสมชาย ตัวอย่าง',unit:'Room 305',docs:{lease:'lease.txt',id:'id_card.txt',receipt:'receipt.txt'},alerts:[]},
 {id:2,tenant:'นางสาวมาลี ทดสอบ',unit:'Room 412',docs:{lease:'lease.txt',id:'id_card.txt',receipt:'receipt.txt'},alerts:[
  {c:'R17',fix:'internal',sev:'high',doc:'lease',title:'Lockout clause is prohibited',detail:'The landlord may not lock the tenant out of the room.',ev:'ผู้ให้เช่ามีสิทธิ์ปิดห้องและเปลี่ยนกุญแจทันทีหากผู้เช่าผิดนัดชำระ',rule:rule('R17','Lockout and seizure of belongings')},
  {c:'R14',fix:'internal',sev:'high',doc:'lease',title:'Deposit forfeiture clause is prohibited',detail:'A blanket forfeiture of the deposit is not allowed.',ev:'เงินประกันถือเป็นของผู้ให้เช่าทั้งจำนวนหากเลิกสัญญาก่อนกำหนด',rule:rule('R14','Deposit forfeiture')},
  {c:'R04',fix:'internal',sev:'high',doc:'lease',title:'Deposit exceeds the cap by ฿8,500',detail:'Deposit ฿34,000 plus advance rent. The cap is 3 months’ rent, ฿25,500.',rule:rule('R04','Deposit and advance rent cap')},
- {c:'R08',fix:'internal',sev:'med',doc:'lease',title:'Required clause missing: handover inspection',detail:'4 more required clauses are missing. Open the lease to see the list.',rule:rule('R08','Required clauses')}]},
+ {c:'R08',fix:'internal',sev:'med',doc:'lease',title:'Required clause missing: invoice notice',detail:'Invoices for rent and utilities must reach the tenant at least 3 days before the due date. 4 more required clauses are missing.',rule:rule('R08','Required clauses')}]},
 {id:3,tenant:'นายวิชัย สมมติ',unit:'Room 518',docs:{lease:'lease.txt',id:'id_card.txt',receipt:'receipt.txt'},alerts:[
  {c:'tenant_sign',fix:'customer',sev:'high',doc:'lease',title:'Tenant has not signed the lease',detail:'The tenant signature line is empty.',ask:'กรุณาลงนามในสัญญาเช่าช่องผู้เช่า / Please sign the lease on the tenant line.'},
  {c:'expired',fix:'customer',sev:'high',doc:'id',title:'ID card has expired',detail:'Expired on 02 Feb 2025.',ask:'บัตรประชาชนหมดอายุแล้ว กรุณาส่งสำเนาบัตรใหม่ / Your ID card has expired; please send a copy of your new card.'},
@@ -140,8 +149,7 @@ const open=c=>c.alerts.filter(a=>!fixed[c.id+a.c]);
 const status=c=>{const o=open(c);return o.some(a=>a.fix==='internal')?'internal':o.length?'customer':'ready'};
 const cnt=(c,f)=>open(c).filter(a=>a.fix===f).length;
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(t.k);t.k=setTimeout(()=>t.classList.remove('show'),2400)}
-function tab(t){$('v-cases').style.display=t==='cases'?'':'none';$('v-bill').style.display=t==='bill'?'grid':'none';
- ['cases','bill'].forEach(k=>$('t-'+k).setAttribute('aria-selected',k===t))}
+function tab(t){['cases','ten','bill'].forEach(k=>{$('v-'+k).style.display=k===t?(k==='cases'?'':'grid'):'none';$('t-'+k).setAttribute('aria-selected',k===t)});if(t==='ten')ten()}
 function side(){
  const I=DATA.reduce((n,c)=>n+cnt(c,'internal'),0),C=DATA.reduce((n,c)=>n+cnt(c,'customer'),0),R=DATA.filter(c=>status(c)==='ready').length;
  $('stats').innerHTML=`<div class="stat i"><b>${I}</b>internal fixes</div><div class="stat c"><b>${C}</b>customer requests</div><div class="stat r"><b>${R}</b>of ${DATA.length} ready to sign</div>`;
@@ -149,9 +157,9 @@ function side(){
   <span class="r"><span>${esc(c.unit)}</span><span>${cnt(c,'internal')?`<span class="cnt i">${cnt(c,'internal')}</span>`:''}${cnt(c,'customer')?`<span class="cnt c">${cnt(c,'customer')}</span>`:''}</span></span></button>`).join('')}
 function pick(id){cur=DATA.find(c=>c.id===id);draw()}
 function card(a){const done=fixed[cur.id+a.c];
- return `<article class="alert ${done?'done':a.sev==='high'?'high':''}"><div class="tags"><span class="tag ${a.sev}">${LV[a.sev]}</span><span class="tag">${KIND[a.doc]}</span>${a.rule?`<span class="tag">${a.rule.id}</span>`:''}</div>
+ return `<article class="alert ${done?'done':a.sev==='high'?'high':''}"><div class="tags"><span class="tag ${a.sev}">${LV[a.sev]}</span><span class="tag">${KIND[a.doc]}</span>${a.rule?`<span class="tag">${a.rule.id}</span>`:''}${MODE==='AI check'&&a.rule?'<span class="tag">AI: quoted from clause</span>':''}</div>
  <h3>${esc(a.title)}</h3><p>${esc(a.detail)}</p>${a.ev?`<blockquote>${esc(a.ev)}</blockquote>`:''}${a.ask&&!done?`<div class="ask">${esc(a.ask)}</div>`:''}
- ${a.rule?`<details><summary>Rule ${a.rule.id}: why this matters</summary><p>${a.rule.t}. Source: ${a.rule.src}.</p></details>`:''}
+ ${a.rule?`<details><summary>Rule ${a.rule.id}: why this matters</summary><p>${a.rule.t}</p><p>Sources: ${a.rule.s}. Status: ${a.rule.st}.</p>${a.rule.note?`<p>${a.rule.note}</p>`:''}</details>`:''}
  ${done?`<div class="note">Marked fixed: ${esc(done)} <button class="link" onclick="reopen('${a.c}')">Reopen</button></div>`
  :`<form onsubmit="fix(event,'${a.c}')"><input name="n" required minlength="3" placeholder="How was it fixed? e.g. clause removed, customer called" aria-label="Fix note"><button>Mark fixed</button></form>`}</article>`}
 function col(f,title,sub){const l=cur.alerts.filter(a=>a.fix===f&&!fixed[cur.id+a.c]);
@@ -160,18 +168,47 @@ function draw(){const s=status(cur),o=open(cur),n=k=>o.filter(a=>a.doc===k).leng
  $('main').innerHTML=`<section class="panel"><div class="head"><div><h1>${esc(cur.tenant)}</h1><div class="sub">${esc(cur.unit)}, case #${cur.id}</div></div><div class="stamp ${s}">${ST[s]}</div></div>
  <div class="verdict ${s}"><span>${VD[s]}</span><button onclick="copyMsg()" ${cnt(cur,'customer')?'':'disabled'}>Copy message for customer</button></div></section>
  <section class="slots">${Object.entries(KIND).map(([k,l])=>{const f=cur.docs[k],c=n(k);
-  return `<div class="slot ${!f?'none':c?'bad':'good'}"><div class="t">${l}</div><div class="f">${f?esc(f)+', uploaded 3 Nov 2026':'Drop TXT, PDF, JPG, PNG or Excel here'}</div>
-  <div class="s">${!f?'Missing':c?c+' open alert'+(c>1?'s':''):'No issues'}</div><div class="b"><button class="link" onclick="replace('${k}')">${f?'Replace':'Upload'}</button>${f?`<button class="link" onclick="toast('Mockup: opens the extracted text')">View text</button>`:''}</div></div>`}).join('')}</section>
+  return `<div class="slot ${busy[cur.id+k]||!f?'none':c?'bad':'good'}" ondragover="event.preventDefault();this.style.borderColor='var(--brand)'" ondragleave="this.style.borderColor=''" ondrop="event.preventDefault();replace('${k}')"><div class="t">${l}</div><div class="f">${f?esc(f)+', uploaded 3 Nov 2026':'Drop TXT, PDF, JPG, PNG or Excel here'}</div>
+  <div class="s">${busy[cur.id+k]?'<span class="spin"></span> Checking…':!f?'Missing':c?c+' open alert'+(c>1?'s':''):'No issues'}</div><div class="b"><button class="link" onclick="replace('${k}')">${f?'Replace':'Upload'}</button>${f?`<button class="link" onclick="viewText('${k}')">View text</button>`:''}</div></div>`}).join('')}</section>
  <section class="cols">${col('internal','Fix internally','Our paperwork against Thai lease rules')}${col('customer','Ask the customer','Only the customer can supply or correct these')}</section>
  ${d.length?`<details><summary>${d.length} marked fixed</summary><div class="col" style="margin-top:10px">${d.map(card).join('')}</div></details>`:''}`;
  side()}
 function fix(e,c){e.preventDefault();fixed[cur.id+c]=e.target.n.value;toast('Marked fixed');draw()}
 function reopen(c){delete fixed[cur.id+c];toast('Reopened');draw()}
-function replace(k){if(cur.id===3&&k==='receipt'){fixed['3short']='Corrected receipt uploaded';toast('Receipt checked, shortfall alert cleared')}else toast('Mockup: opens the file picker');draw()}
+function replace(k){const key=cur.id+k,c=cur;busy[key]=1;draw();setTimeout(()=>{delete busy[key];c.docs[k]=c.docs[k]||(k==='id'?'id_card.txt':k+'.txt');c.alerts=c.alerts.filter(a=>a.c!=='pack_'+k&&a.c!=='read_'+k);if(c.id===3&&k==='receipt')fixed['3short']='Corrected receipt uploaded';toast(KIND[k]+' checked');draw()},1200)}
 async function copyMsg(){const a=cur.alerts.filter(a=>a.fix==='customer'&&!fixed[cur.id+a.c]);
  const t=`เรียน คุณ${cur.tenant.replace(/^(นางสาว|นาง|นาย)/,'')}\nเพื่อดำเนินการทำสัญญาเช่า ${cur.unit} ให้เรียบร้อย รบกวนดำเนินการดังนี้ / To complete your lease for ${cur.unit}, please:\n\n`+a.map((x,i)=>`${i+1}. ${x.ask}`).join('\n')+'\n\nขอบคุณค่ะ / Thank you';
  try{await navigator.clipboard.writeText(t);toast('Message copied. Paste it into LINE or email')}catch{toast('Message ready to copy (clipboard blocked in preview)')}}
 $('rooms').innerHTML=ROOMS.map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>฿${r[2].toLocaleString()}</td><td>฿${r[3].toLocaleString()}</td><td>฿${(r[2]-r[3]).toLocaleString()}</td><td><span class="pill ${r[4]}">${r[5]}</span></td><td><button class="link" onclick="toast('Mockup: opens the receipt')">Review</button></td></tr>`).join('');
+let MODE='keyword rules',rid=30;const busy={};
+DATA.push({id:4,tenant:'นางสาวกานดา สุขใจ',unit:'Room 601',docs:{lease:'lease.pdf',id:'id_scan.jpg',receipt:null},alerts:[
+ {c:'pack_receipt',fix:'customer',sev:'high',doc:'receipt',title:'Deposit receipt is missing',detail:'No receipt has been uploaded.',ask:'กรุณาส่งใบเสร็จเงินประกัน / Please send your deposit receipt.'},
+ {c:'read_id',fix:'customer',sev:'high',doc:'id',title:'ID card can’t be read',detail:'No Thai text found. This looks like a photo or scan.',ask:'ไม่สามารถอ่านบัตรประชาชนได้ กรุณาส่งภาพที่ชัดเจน / We can’t read your ID card; please send a clearer copy.'},
+ {c:'model',fix:'internal',sev:'check',doc:'lease',title:'AI check failed, keyword rules used instead',detail:'The model didn’t answer in time. A staff member should read the lease.'}]});
+const RENT={1:[10500,5],2:[8500,5],3:[10500,5],4:[9000,1]},AC={},RC={1:[{id:11,f:'nov_receipt.txt',a:10500,s:'verified'}],2:[{id:12,f:'receipt_nov.png',a:10500,s:'verified'}],3:[{id:14,f:'receipt.txt',a:8500,s:'pending'}],4:[]},RF={2:[{id:2,rc:12,a:2000,s:'pending'}]};let arch=false,ed=0;
+const SAMPLE={lease:'สัญญาเช่าห้องพัก\nข้อ 4 ค่าเช่าเดือนละ 8,500 บาท (แปดพันห้าร้อยบาทถ้วน)\nข้อ 7 ผู้ให้เช่ามีสิทธิ์ปิดห้องและเปลี่ยนกุญแจทันทีหากผู้เช่าผิดนัดชำระ\nลงชื่อ ................ ผู้ให้เช่า\nลงชื่อ ................ ผู้เช่า',id:'บัตรประจำตัวประชาชน\nเลขประจำตัว 1-2345-67890-12-3\nชื่อ นายวิชัย สมมุติ\nบัตรหมดอายุ 02 ก.พ. 2568',receipt:'ใบรับเงินประกัน\nได้รับเงินประกันจำนวน 10,000 บาท\nจาก นายวิชัย สมมติ'};
+const th=n=>'฿'+n.toLocaleString();
+function viewText(k){$('vT').textContent=KIND[k]+', '+cur.docs[k];$('vB').textContent='Sample extracted text (mock)\n\n'+SAMPLE[k];$('dView').showModal()}
+function toggleMode(){MODE=MODE==='AI check'?'keyword rules':'AI check';$('mode').textContent=MODE;toast(MODE==='AI check'?'AI check on: clauses are read for meaning':'Keyword rules on: works offline');draw()}
+function makeCase(e){e.preventDefault();const f=e.target,id=DATA.length+1,p=(c,fix,doc,t)=>({c,fix,sev:'high',doc,title:t,detail:'Nothing uploaded yet.',ask:fix==='customer'?'กรุณาส่งเอกสาร / Please send this document.':undefined});
+ DATA.push({id,tenant:f.tenant.value,unit:f.unit.value,docs:{lease:null,id:null,receipt:null},alerts:[p('pack_lease','internal','lease','Lease contract is missing'),p('pack_id','customer','id','Thai ID card is missing'),p('pack_receipt','customer','receipt','Deposit receipt is missing')]});
+ RENT[id]=[0,1];RC[id]=[];f.reset();$('dNew').close();pick(id);toast('Case created')}
+function edT(id){ed=id;const c=DATA.find(x=>x.id===id);$('fT').value=c.tenant;$('fU').value=c.unit;$('dEdit').showModal()}
+function saveT(e){e.preventDefault();const c=DATA.find(x=>x.id===ed);c.tenant=$('fT').value;c.unit=$('fU').value;$('dEdit').close();ten();draw();toast('Updated tenant')}
+function edR(id){ed=id;$('fA').value=RENT[id][0];$('fD').value=RENT[id][1];$('dRent').showModal()}
+function saveR(e){e.preventDefault();RENT[ed]=[+$('fA').value,+$('fD').value];$('dRent').close();ten();toast('Rent saved')}
+function arc(id){AC[id]=!AC[id];ten();toast(AC[id]?'Archived. Records are kept.':'Restored')}
+function addRc(id){toast('Checking receipt…');setTimeout(()=>{const l=RC[id]=RC[id]||[],a=(RENT[id][0]||0)-(id===2?0:1500);l.push({id:rid++,f:'receipt_new.jpg',a:Math.max(a,0),s:'pending'});ten();toast('Amount read from receipt: '+th(Math.max(a,0)))},900)}
+function rv(c,r,s){const x=RC[c].find(y=>y.id===r),rent=RENT[c][0];if(s==='verified'&&x.a<rent){toast('Underpayment: '+th(x.a)+' is below the rent of '+th(rent)+'. Can’t verify.');return}
+ x.s=s;if(s==='verified'&&x.a>rent)(RF[c]=RF[c]||[]).push({id:rid++,rc:r,a:x.a-rent,s:'pending'});ten();toast(s==='verified'?'Receipt verified':'Receipt rejected')}
+function rf(c,r){RF[c].find(x=>x.id===r).s='refunded';ten();toast('Refund marked as done')}
+function ten(){$('tenmain').innerHTML=`<section class="panel"><div class="head"><div><h1 style="font-size:24px">Tenants and monthly receipts</h1><div class="sub">November 2026. Staff confirm the money was received before verifying.</div></div><label style="margin-left:auto"><input type="checkbox" ${arch?'checked':''} onchange="arch=this.checked;ten()"> Show archived</label></div>
+ ${DATA.filter(c=>arch||!AC[c.id]).map(c=>{const [r,d]=RENT[c.id],rc=RC[c.id]||[],v=rc.filter(x=>x.s==='verified').reduce((n,x)=>n+Math.min(x.a,r),0),bal=Math.max(r-v,0);
+ return `<div class="alert" style="margin-top:12px"><div class="head"><b>${esc(c.tenant)}, ${esc(c.unit)}${AC[c.id]?' (archived)':''}</b><span class="sub">${r?th(r)+' per month, due day '+d:'Rent not set'}</span><span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button onclick="edT(${c.id})">Edit tenant</button><button onclick="edR(${c.id})">Set rent</button><button onclick="arc(${c.id})">${AC[c.id]?'Restore':'Archive tenant'}</button></span></div>
+ <div>Verified rent ${th(v)}, balance ${th(bal)} <span class="pill ${bal?'wait':'ok'}">${!r?'No rent set':bal?'Unpaid':'Paid'}</span></div>
+ <div class="head"><button onclick="addRc(${c.id})">Upload and check amount</button><span class="sub">Reads text, photos (OCR), scanned PDFs and Excel.</span></div>
+ ${rc.map(x=>`<div class="head" style="border:1px solid var(--line);border-radius:8px;padding:8px 10px">#${x.id} ${esc(x.f)}, ${th(x.a)} <span class="pill ${x.s==='verified'?'ok':x.s==='rejected'?'bad':'wait'}">${x.s}</span><span style="margin-left:auto;display:flex;gap:6px"><button ${x.s==='verified'?'disabled':''} onclick="rv(${c.id},${x.id},'verified')">Verify</button><button ${x.s==='rejected'?'disabled':''} onclick="rv(${c.id},${x.id},'rejected')">Reject</button></span></div>`).join('')}
+ ${(RF[c.id]||[]).map(x=>`<div class="head" style="border:1px solid var(--cus-line);background:var(--cus-bg);border-radius:8px;padding:8px 10px">Refund #${x.id} for receipt #${x.rc}: ${th(x.a)}, ${x.s}${x.s==='pending'?`<button style="margin-left:auto" onclick="rf(${c.id},${x.id})">Mark refunded externally</button>`:''}</div>`).join('')}</div>`}).join('')}</section>`}
 draw();
 </script>
 </body>
